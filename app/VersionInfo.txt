@@ -1,0 +1,27 @@
+
+1 VERSIONINFO
+FILEVERSION 1,3,3,1
+PRODUCTVERSION 1,0,0,1
+FILEOS 0x40004
+FILETYPE 0x1
+{
+BLOCK "StringFileInfo"
+{
+	BLOCK "040904B0"
+	{
+		VALUE "CompanyName", "Jzh工作室"
+		VALUE "FileDescription", "OleanderChat"
+		VALUE "FileVersion", "1.0.0.1"
+		VALUE "InternalName", "OleanderChat"
+		VALUE "LegalCopyright", "\xA9 Jzh工作室. All rights reserved."
+		VALUE "OriginalFilename", "main.exe"
+		VALUE "ProductName", "OleanderChat"
+		VALUE "ProductVersion", "1.0.0.1"
+	}
+}
+
+BLOCK "VarFileInfo"
+{
+	VALUE "Translation", 0x04B0 0xFFFD  
+}
+}
