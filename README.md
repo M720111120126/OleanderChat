@@ -18,8 +18,10 @@ OleanderChat/
 ├── app/                    # 客户端应用目录
 │   ├── addressBook/        # 好友信息存储目录
 │   ├── output/             # 临时文件输出目录
+|   ├── build.bat           # Windows下的打包脚本文件
 │   ├── main.py             # 主程序文件
-│   └── user.py             # 用户管理和加密功能模块
+│   ├── user.py             # 用户管理和加密功能模块
+│   └── VersionInfo.txt     # 版本信息文件
 ├── server/                 # 服务器端脚本
 │   ├── id_allocator.php    # 用户ID分配服务
 │   ├── ipv6_allocator.php  # IPv6地址注册服务

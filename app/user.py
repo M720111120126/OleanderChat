@@ -3,8 +3,10 @@ import pyzipper
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 import base64, urllib.request, json
+import psutil
 
-root_path = os.path.dirname(os.path.abspath(__file__))
+root_path = os.path.dirname(psutil.Process().exe())
+print(f"Root path: {root_path}")
 output_dir = os.path.join(root_path, "output")
 
 def compress_zip(zip_filename, files_to_add):

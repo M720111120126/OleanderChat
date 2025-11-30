@@ -8,6 +8,9 @@ import ssl, random
 context = ssl.create_default_context()
 context.check_hostname = True
 context.verify_mode = ssl.CERT_REQUIRED
+myself_path = user.root_path
+
+print(myself_path)
 
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
@@ -47,12 +50,12 @@ else:
     print("No IPv6 addresses found.")
     sys.exit()
 
-if os.path.exists("addressBook") == False:
-    os.mkdir("addressBook")
-if os.path.exists("output") == False:
-    os.mkdir("output")
+if os.path.exists(os.path.join(myself_path, "addressBook")) == False:
+    os.mkdir(os.path.join(myself_path, "addressBook"))
+if os.path.exists(os.path.join(myself_path, "output")) == False:
+    os.mkdir(os.path.join(myself_path, "output"))
 
-if not os.path.exists("user.zip"):
+if not os.path.exists(os.path.join(myself_path, "user.zip")):
         username = str(simpledialog.askstring("Input", "请输入用户名："))
         if username == "None" or username == "":
             sys.exit(0)
@@ -90,18 +93,18 @@ except Exception as e:
     print(f"网络请求时发生错误: {e}")
     sys.exit(1)
 
-files = os.listdir("addressBook")
+files = os.listdir(os.path.join(myself_path, "addressBook"))
 friends = {}
 chat_record = {}
 for file in files:
-    public_key, name, user_id = user.analyze_users(os.path.join("addressBook", file))
-    friends[user_id] = {
-        "user_id": user_id,
-        "public_key": public_key,
-        "name": name,
+    public_key2, name2, user_id2 = user.analyze_users(os.path.join(myself_path, "addressBook", file))
+    friends[user_id2] = {
+        "user_id": user_id2,
+        "public_key": public_key2,
+        "name": name2,
         "file": file
     }
-    chat_record[name] = []
+    chat_record[name2] = []
 
 # 创建一个队列用于线程间通信
 message_queue = queue.Queue()
@@ -461,7 +464,7 @@ class WeChatUI:
         """添加好友"""
         friend_file = filedialog.askopenfilename(title="请选择好友文件:", filetypes=[("压缩文件", "*.zip")])
         if friend_file:
-            shutil.copy(friend_file, os.path.join("addressBook", f"{time.time()}.zip"))
+            shutil.copy(friend_file, os.path.join(myself_path, "addressBook", f"{time.time()}.zip"))
             public_key, name, user_id = user.analyze_users(friend_file)
             friends[user_id] = {
                 "user_id": user_id,
@@ -477,7 +480,7 @@ class WeChatUI:
         selection = self.friend_listbox.selection()
         if selection:
             friend_name = self.friend_listbox.item(selection[0])["text"]
-            os.remove(os.path.join("addressBook", f"{friends[user_id]['file']}"))
+            os.remove(os.path.join(myself_path, "addressBook", f"{friends[user_id]['file']}"))
             for key in friends.keys():
                 if friends[key]["name"] == friend_name:
                     del friends[key]
@@ -543,7 +546,7 @@ class WeChatUI:
             try:
                 with open(file_path, "rb") as f:
                     file_data = base64.b64encode(f.read()).decode('utf-8')
-                message = f"{file_data} card(file)"
+                message = f"{file_data} card(file) {os.path.basename(file_path)}"
                 send_long_message(this_friend["user_id"], this_friend["public_key"], message)
                 self.display_card("我: "+message)
                 chat_record[this_friend["name"]].append("我: "+message)
@@ -572,11 +575,11 @@ class WeChatUI:
         if "card(file)"  in message:
             file = message.split(" card(file)")[0]
             self.chat_text.config(state=NORMAL) # pyright: ignore[reportArgumentType]
-            self.chat_text.insert(END, message.split(": ")[0] + "： 发送了一个文件\n")
+            self.chat_text.insert(END, message.split(": ")[0] + f"： {message.split(' card(file) ')[1]}\n")
             self.chat_text.tag_add("url", "end-10c", "end-1c")  # 标记"点击这里打开网页"这段文字
             self.chat_text.tag_config("url", foreground="blue", underline=True)
             def download_file(file):
-                with open(filedialog.asksaveasfilename(title="保存文件为:"), "wb") as f:
+                with open(filedialog.asksaveasfilename(title="保存文件为:", initialfile=message.split(" card(file) ")[1]), "wb") as f:
                     f.write(base64.b64decode(file.split(": ")[1]))
             self.chat_text.tag_bind("url", "<Button-1>", lambda e, f=file: download_file(f))
             self.chat_text.see(END)
