@@ -1,89 +1,25 @@
-import socket
-import threading
-import shutil, time
-import queue, sys
-import user, os, urllib.request, json, urllib.error
-import ssl, random
+import socket, threading, shutil, time, queue, sys, user, os, urllib.request, json, urllib.error
+import ssl, base64
 
 context = ssl.create_default_context()
 context.check_hostname = True
 context.verify_mode = ssl.CERT_REQUIRED
 myself_path = user.root_path
-
-print(myself_path)
-
-from Crypto.Signature import pkcs1_15
-from Crypto.Hash import SHA256
-from Crypto.PublicKey import RSA
-import base64
-
-MAX_CHUNK_SIZE = 200
-
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import BOTH, LEFT, RIGHT, Y, X, YES, BROWSE, W, CENTER, VERTICAL, WORD, END, DISABLED, NORMAL, FLAT
-import tkinter as tk
-from tkinter import font as tkfont
-from tkinter import simpledialog
-from tkinter import messagebox
-from tkinter import filedialog
-
-def get_ipv6_addresses():
-    ipv6_addresses = []
-    try:
-        # 获取所有网络接口的信息
-        info = socket.getaddrinfo(socket.gethostname(), None)
-        for addr in info:
-            # 检查地址族是否为AF_INET6（IPv6）
-            if addr[0] == socket.AF_INET6 and addr[4][0] != '::1' and "fe80" not in addr[4][0]: # pyright: ignore[reportOperatorIssue]
-                ipv6_addresses.append(addr[4][0])
-    except Exception as e:
-        print(f"Error retrieving IPv6 addresses: {e}")
-    return ipv6_addresses
-
-ipv6_addresses = get_ipv6_addresses()
-if ipv6_addresses:
-    print("IPv6 Addresses:")
-    for ip in ipv6_addresses:
-        print(ip)
-else:
-    messagebox.showerror("错误", "未找到IPv6地址，请检查网络设置。")
-    print("No IPv6 addresses found.")
-    sys.exit()
-
 if os.path.exists(os.path.join(myself_path, "addressBook")) == False:
     os.mkdir(os.path.join(myself_path, "addressBook"))
 if os.path.exists(os.path.join(myself_path, "output")) == False:
     os.mkdir(os.path.join(myself_path, "output"))
 
-temp_window = tk.Tk()
-temp_window.withdraw()
-if not os.path.exists(os.path.join(myself_path, "user.zip")):
-        username = str(simpledialog.askstring("Input", "请输入用户名："))
-        if username == "None" or username == "":
-            temp_window.destroy()
-            sys.exit(0)
-        password = str(simpledialog.askstring("Input", "请输入密码："))
-        if password == "None" or password == "":
-            temp_window.destroy()
-            sys.exit(0)
-        public_key, private_key, name, user_id = user.create_user(username, password)
-else:
-    right = False
-    while not right:
-        password = str(simpledialog.askstring("Input", "请输入密码："))
-        if password == "None" or password == "":
-            temp_window.destroy()
-            sys.exit(0)
-        right, public_key, private_key, name, user_id = user.login_user(password)
-temp_window.destroy()
-
-payload = {
-    "uuid": user_id, # pyright: ignore[reportPossiblyUnboundVariable]
-    "ipv6_address": get_ipv6_addresses()[0]
-}
+import connect
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import BOTH, LEFT, RIGHT, Y, X, YES, BROWSE, W, CENTER, VERTICAL, WORD, END, DISABLED, NORMAL, FLAT, NO
+import tkinter as tk
+from tkinter import font as tkfont
+from tkinter import messagebox
+from tkinter import filedialog
 
 try:
-    json_data = json.dumps(payload).encode('utf-8')
+    json_data = json.dumps(connect.payload).encode('utf-8')
     req = urllib.request.Request("https://xn--jzh-k69dm57c4fd.xyz/ipv6_allocator.php", data=json_data, headers={'Content-Type': 'application/json'}, method='POST')
     urllib.request.urlopen(req, context=context)
 except urllib.error.URLError as e:
@@ -99,94 +35,15 @@ except Exception as e:
     print(f"网络请求时发生错误: {e}")
     sys.exit(1)
 
-files = os.listdir(os.path.join(myself_path, "addressBook"))
-friends = {}
-chat_record = {}
-for file in files:
-    public_key2, name2, user_id2 = user.analyze_users(os.path.join(myself_path, "addressBook", file))
-    friends[user_id2] = {
-        "user_id": user_id2,
-        "public_key": public_key2,
-        "name": name2,
-        "file": file
-    }
-    chat_record[name2] = []
-
 # 创建一个队列用于线程间通信
 message_queue = queue.Queue()
 message_caches = {}
 active_messages = {}
 
-def recvall(sock, n):
-    """Helper function to recv n bytes or return None if EOF is hit"""
-    # 用于确保接收恰好 n 个字节
-    data = b''
-    while len(data) < n:
-        packet = sock.recv(n - len(data))
-        if not packet:
-            return None
-        data += packet
-    return data
-
-def server_receive(s: socket.socket):
-    # 1. 接收消息体的长度 (4 bytes)
-    raw_msg_len = recvall(s, 4)
-    if not raw_msg_len:
-        print("Connection closed by client")
-        return None, None
-    msg_len = int.from_bytes(raw_msg_len, 'big')
-
-    # 2. 根据长度接收消息体
-    msg_bytes = recvall(s, msg_len)
-    if not msg_bytes:
-        print("Connection closed by client")
-        return None, None
-    message = msg_bytes.decode('utf-8') # 将字节解码回字符串
-
-    # 3. 接收签名的长度 (4 bytes)
-    raw_sig_len = recvall(s, 4)
-    if not raw_sig_len:
-        print("Connection closed by client")
-        return None, None
-    sig_len = int.from_bytes(raw_sig_len, 'big')
-
-    # 4. 根据长度接收签名
-    sig_bytes = recvall(s, sig_len)
-    if not sig_bytes:
-        print("Connection closed by client")
-        return None, None
-    signature = base64.b64decode(sig_bytes) # 将Base64字节解码回原始签名
-
-    return message, signature
-
-def handle_client(conn, addr, message_queue):
-    try:
-        while True:
-            message, signature = server_receive(conn)
-            if not message or not signature:
-                break
-            message = json.loads(user.decrypt_message(private_key, message)) # pyright: ignore[reportArgumentType]
-            this_friend = {}
-            for key in friends.keys():
-                if friends[key]["name"] == message["name"]:
-                    this_friend = friends[key]
-            try:
-                # 创建相同的哈希对象
-                hasher = SHA256.new(message["message"].encode('utf-8'))
-                # 创建一个验证对象
-                verifier = pkcs1_15.new(RSA.import_key(this_friend["public_key"]))
-                # 验证签名
-                verifier.verify(hasher, signature)
-                # 将接收到的消息放入队列
-                message_queue.put(message)
-            except ValueError:
-                pass
-            except Exception as e:
-                messagebox.showerror("错误", f"验证过程中发生错误: {e}")
-                print(f"验证过程中发生错误: {e}")
-
-    finally:
-        conn.close()
+firends_online = {}
+for id in connect.friends.keys():
+    i = connect.friends[id]
+    firends_online[i["name"]] = {"oline": True, "user_id": i["user_id"], "host": None}
 
 def start_server(host, port, message_queue, stop_event):
     active_threads = []
@@ -199,7 +56,7 @@ def start_server(host, port, message_queue, stop_event):
             while not stop_event.is_set():
                 try:
                     conn, addr = s.accept()
-                    client_thread = threading.Thread(target=handle_client, args=(conn, addr, message_queue), daemon=True)
+                    client_thread = threading.Thread(target=connect.handle_client, args=(conn, addr, message_queue), daemon=True)
                     client_thread.start()
                     active_threads.append(client_thread)
                     active_threads = [t for t in active_threads if t.is_alive()]
@@ -212,169 +69,38 @@ def start_server(host, port, message_queue, stop_event):
                 if thread.is_alive():
                     thread.join(timeout=1)
 
-def send_message(user_id, public_key, message_str, port=19042):
-    host = ""
-    message_data = {"message": message_str, "name": name}
-    message_json = json.dumps(message_data)
-    
-    # 如果JSON序列化后太大，自动切换到长消息发送方式
-    if len(message_json.encode('utf-8')) > 400:  # 保守估计RSA OAEP限制
-        return send_long_message(user_id, public_key, message_str, port)
-    try:
-        url = f"https://xn--jzh-k69dm57c4fd.xyz/ipv6_query.php?uuid={user_id}"
-        response = urllib.request.urlopen(url, timeout=10, context=context)
-        content = response.read()
-        host = json.loads(content.decode('utf-8'))["ipv6_address"]
-    except urllib.error.URLError as e:
-        messagebox.showerror("错误", f"网络请求失败: {e}")
-        print(f"网络请求失败: {e}")
-        sys.exit(1)
-    except socket.timeout:
-        messagebox.showerror("错误", "连接超时，请检查网络连接")
-        print("连接超时，请检查网络连接")
-        sys.exit(1)
-    except Exception as e:
-        messagebox.showerror("错误", f"网络请求时发生错误: {e}")
-        print(f"网络请求时发生错误: {e}")
-        sys.exit(1)
-    with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
-        s.connect((host, port))
-        # 创建一个SHA256哈希对象
-        hasher = SHA256.new(message_str.encode('utf-8'))
-        # 创建一个签名对象
-        signer = pkcs1_15.new(RSA.import_key(private_key)) # pyright: ignore[reportArgumentType]
-        # 生成签名
-        signature = signer.sign(hasher)
-        message = user.encrypt_message(public_key, json.dumps({"message": message_str, "name": name})) # pyright: ignore[reportArgumentType]
-        msg_bytes = message.encode('utf-8')
-        sig_bytes = base64.b64encode(signature)
-        packet = (
-            len(msg_bytes).to_bytes(4, 'big') +
-            msg_bytes +
-            len(sig_bytes).to_bytes(4, 'big') +
-            sig_bytes
-        )
-        s.sendall(packet)
+def Peer_server(host, port, stop_event):
+    """启动IPv6服务端，监听心跳包"""
+    server = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    server.bind((host, port))
+    server.listen(5)
+    print(f"Peer服务端启动，监听 IPv6 地址 {host}:{port}")
+    while not stop_event.is_set():
+        client, addr = server.accept()
+        data = client.recv(1024).decode()
+        if data == "HEARTBEAT":
+            client.send("HEARTBEAT".encode())
+            print(f"收到对方心跳包，对方在线: {addr}")
+        client.close()
 
-def send_long_message(user_id, public_key, message_str, port=19042):
-    host = ""
+def send_heartbeat(host, port, name):
+    """定期发送心跳包给对方（IPv6）"""
+    client = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    client.settimeout(3)
     try:
-        # 获取接收方的IPv6地址
-        url = f"https://xn--jzh-k69dm57c4fd.xyz/ipv6_query.php?uuid={user_id}"
-        response = urllib.request.urlopen(url, timeout=10, context=context)
-        content = response.read()
-        host = json.loads(content.decode('utf-8'))["ipv6_address"]
+        client.connect((host, port))
+        client.send("HEARTBEAT".encode())
+        data = client.recv(1024).decode()
+        print(f"已发送心跳包给 {host}")
+        if data == "HEARTBEAT":
+            ui.update_friend_status(name, "在线")
+            return True
     except Exception as e:
-        messagebox.showerror("错误", f"获取好友地址失败: {e}")
-        print(f"获取好友地址失败: {e}")
-        raise
-    
-    # 创建一个唯一的消息ID
-    msg_id = f"{int(time.time())}_{random.randint(1000, 9999)}"
-    
-    # 将消息转换为字节并计算总分片数
-    message_bytes = message_str.encode('utf-8')
-    total_chunks = (len(message_bytes) + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE  # 向上取整
-    
-    try:
-        # 创建单一连接用于发送所有分片
-        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
-            s.connect((host, port))
-            
-            # 发送开始标记
-            start_msg = json.dumps({"message": "[长消息，开始௹⺟]", "name": name, "msg_id": msg_id, "total": total_chunks})
-            encrypted_start = user.encrypt_message(public_key, start_msg)
-            start_bytes = encrypted_start.encode('utf-8')
-            start_hasher = SHA256.new("[长消息，开始௹⺟]".encode('utf-8'))
-            start_signer = pkcs1_15.new(RSA.import_key(private_key)) # pyright: ignore[reportArgumentType]
-            start_signature = start_signer.sign(start_hasher)
-            start_sig_bytes = base64.b64encode(start_signature)
-            
-            start_packet = (
-                len(start_bytes).to_bytes(4, 'big') +
-                start_bytes +
-                len(start_sig_bytes).to_bytes(4, 'big') +
-                start_sig_bytes
-            )
-            s.sendall(start_packet)
-            
-            # 按字节分片发送数据
-            for i in range(0, len(message_bytes), MAX_CHUNK_SIZE):
-                # 提取字节片段并解码回字符串（确保UTF-8完整性）
-                # 注意：这里需要确保不会截断多字节字符
-                chunk_bytes = message_bytes[i:i+MAX_CHUNK_SIZE]
-                # 确保解码安全（处理可能的截断）
-                try:
-                    chunk = chunk_bytes.decode('utf-8')
-                except UnicodeDecodeError:
-                    # 如果发生解码错误，尝试回退几个字节以找到完整的UTF-8字符
-                    for j in range(1, 5):  # UTF-8最多4字节
-                        if i + MAX_CHUNK_SIZE - j > i:
-                            chunk_bytes_safe = message_bytes[i:i+MAX_CHUNK_SIZE-j]
-                            try:
-                                chunk = chunk_bytes_safe.decode('utf-8')
-                                break
-                            except UnicodeDecodeError:
-                                continue
-                    else:
-                        # 最坏情况下，使用错误处理模式
-                        chunk = chunk_bytes.decode('utf-8', errors='replace')
-                
-                # 确保JSON序列化后的大小不会超过RSA限制
-                # 预检查JSON序列化后的大小
-                chunk_data = {"message": chunk, "name": name, "msg_id": msg_id, "index": i//MAX_CHUNK_SIZE}
-                chunk_json = json.dumps(chunk_data)
-                
-                # 如果JSON序列化后太大，进一步减小chunk大小
-                while len(chunk_json.encode('utf-8')) > 400:  # 保守估计RSA OAEP限制
-                    # 从末尾删除几个字符并重新检查
-                    chunk = chunk[:-3]
-                    chunk_data["message"] = chunk
-                    chunk_json = json.dumps(chunk_data)
-                    
-                    # 如果已经很小了还不行，就只保留一个字符
-                    if len(chunk) <= 1:
-                        break
-                
-                encrypted_chunk = user.encrypt_message(public_key, chunk_json)
-                
-                chunk_msg = json.dumps({"message": chunk, "name": name, "msg_id": msg_id, "index": i//MAX_CHUNK_SIZE})
-                encrypted_chunk = user.encrypt_message(public_key, chunk_msg)
-                chunk_send_bytes = encrypted_chunk.encode('utf-8')
-                chunk_hasher = SHA256.new(chunk.encode('utf-8'))
-                chunk_signer = pkcs1_15.new(RSA.import_key(private_key)) # pyright: ignore[reportArgumentType]
-                chunk_signature = chunk_signer.sign(chunk_hasher)
-                chunk_sig_bytes = base64.b64encode(chunk_signature)
-                
-                chunk_packet = (
-                    len(chunk_send_bytes).to_bytes(4, 'big') +
-                    chunk_send_bytes +
-                    len(chunk_sig_bytes).to_bytes(4, 'big') +
-                    chunk_sig_bytes
-                )
-                s.sendall(chunk_packet)
-                
-            # 发送结束标记
-            end_msg = json.dumps({"message": "[长消息，结束௹⺟]", "name": name, "msg_id": msg_id})
-            encrypted_end = user.encrypt_message(public_key, end_msg)
-            end_bytes = encrypted_end.encode('utf-8')
-            end_hasher = SHA256.new("[长消息，结束௹⺟]".encode('utf-8'))
-            end_signer = pkcs1_15.new(RSA.import_key(private_key)) # pyright: ignore[reportArgumentType]
-            end_signature = end_signer.sign(end_hasher)
-            end_sig_bytes = base64.b64encode(end_signature)
-            
-            end_packet = (
-                len(end_bytes).to_bytes(4, 'big') +
-                end_bytes +
-                len(end_sig_bytes).to_bytes(4, 'big') +
-                end_sig_bytes
-            )
-            s.sendall(end_packet)
-            
-    except Exception as e:
-        messagebox.showerror("错误", f"发送长消息失败: {e}")
-        print(f"发送长消息失败: {e}")
-        raise
+        print(f"发送心跳包失败: {e}")
+    finally:
+        client.close()
+    ui.update_friend_status(name, "离线")
+    return False
 
 class WeChatUI:
     def __init__(self, root):
@@ -387,32 +113,36 @@ class WeChatUI:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=BOTH, expand=YES, padx=5, pady=5)
         friend_frame = ttk.Labelframe(main_frame, text="好友列表", bootstyle="info")
-        friend_frame.pack(side=LEFT, fill=Y, padx=(0,5))
+        friend_frame.pack(side=LEFT, fill=Y, padx=(0,5), pady=5)
+        self.friend_listbox = ttk.Treeview(
+            friend_frame, 
+            height=20, 
+            selectmode=BROWSE,
+            show='tree headings',
+            columns=("status",)
+        )
+        self.friend_listbox.column("#0", width=150, anchor=W, stretch=NO)  # pyright: ignore[reportArgumentType] # 好友名
+        self.friend_listbox.column("status", width=100, anchor=CENTER, stretch=NO)  # pyright: ignore[reportArgumentType] # 状态
+        self.friend_listbox.heading("#0", text="好友")
+        self.friend_listbox.heading("status", text="状态")
+        friend_scroll = ttk.Scrollbar(friend_frame, orient=VERTICAL, command=self.friend_listbox.yview)
+        friend_scroll.pack(side=RIGHT, fill=Y, padx=(0,5), pady=5)
+        self.friend_listbox.configure(yscrollcommand=friend_scroll.set)
+        self.friend_listbox.pack(side=LEFT, fill=Y, padx=(5,0), pady=5)
         self.context_menu = tk.Menu(self.root, tearoff=0)
         self.context_menu.add_command(label="加好友", command=self.add_friend)
         self.context_menu.add_command(label="删除好友", command=self.remove_friend)
         friend_frame.bind("<Button-3>", self.show_context_menu)
         friend_frame.bind("<Button-2>", self.show_context_menu)
-        self.friend_listbox = ttk.Treeview(friend_frame, height=20, selectmode=BROWSE)
-        self.friend_listbox.pack(side=LEFT, fill=Y, padx=5, pady=5)
-        friend_scroll = ttk.Scrollbar(friend_frame, orient=VERTICAL, command=self.friend_listbox.yview)
-        friend_scroll.pack(side=RIGHT, fill=Y)
-        self.friend_listbox.configure(yscrollcommand=friend_scroll.set)
-        self.friend_listbox["columns"] = ("status",)
-        self.friend_listbox.column("#0", width=120, anchor=W)
-        self.friend_listbox.column("status", width=20, anchor=CENTER)
-        self.friend_listbox.heading("#0", text="好友")
         self.friend_listbox.bind("<Button-3>", self.show_context_menu)
         self.friend_listbox.bind("<Button-2>", self.show_context_menu)
-
-        for friend in friends.values():
-            self.friend_listbox.insert("", "end", text=friend["name"])
-
+        for friend in connect.friends.values():
+            self.friend_listbox.insert("", "end", text=friend["name"], values=("在线" if firends_online[friend["name"]]["oline"] else "离线",))
         chat_frame = ttk.Frame(main_frame)
         chat_frame.pack(side=RIGHT, fill=BOTH, expand=YES)
         title_frame = ttk.Frame(chat_frame)
         title_frame.pack(fill=X, pady=(0,5))
-        self.chat_title = ttk.Label(title_frame, text="选择一个好友开始聊天", font=self.custom_font)
+        self.chat_title = ttk.Label(title_frame, text="OleanderChat", font=self.custom_font)
         self.chat_title.pack(side=LEFT, padx=10)
         chat_container = ttk.Frame(chat_frame)
         chat_container.pack(fill=BOTH, expand=YES, pady=(0,5))
@@ -472,13 +202,13 @@ class WeChatUI:
         if friend_file:
             shutil.copy(friend_file, os.path.join(myself_path, "addressBook", f"{time.time()}.zip"))
             public_key, name, user_id = user.analyze_users(friend_file)
-            friends[user_id] = {
+            connect.friends[user_id] = {
                 "user_id": user_id,
                 "public_key": public_key,
                 "name": name,
                 "file": f"{time.time()}.zip"
             }
-            chat_record[name] = []
+            connect.chat_record[name] = []
             self.friend_listbox.insert("", "end", text=name)
 
     def remove_friend(self):
@@ -486,12 +216,12 @@ class WeChatUI:
         selection = self.friend_listbox.selection()
         if selection:
             friend_name = self.friend_listbox.item(selection[0])["text"]
-            os.remove(os.path.join(myself_path, "addressBook", f"{friends[user_id]['file']}"))
-            for key in friends.keys():
-                if friends[key]["name"] == friend_name:
-                    del friends[key]
+            os.remove(os.path.join(myself_path, "addressBook", f"{connect.friends[connect.user_id]['file']}"))
+            for key in connect.friends.keys():
+                if connect.friends[key]["name"] == friend_name:
+                    del connect.friends[key]
                     break
-            del chat_record[friend_name]
+            del connect.chat_record[friend_name]
             self.friend_listbox.delete(selection[0])
 
     def on_friend_select(self, event):
@@ -499,12 +229,28 @@ class WeChatUI:
         selection = self.friend_listbox.selection()
         if selection:
             friend_name = self.friend_listbox.item(selection[0])["text"]
-            self.chat_title.config(text=f"与 {friend_name} 聊天中")
+            firends_online[friend_name]["oline"] = send_heartbeat(firends_online[friend_name]["host"], 19043, friend_name)
+            if not firends_online[friend_name]["oline"]:
+                messagebox.showerror("错误", "好友不在线")
+                return
+            self.chat_title.config(text=f"{friend_name}")
             self.chat_text.config(state=NORMAL) # pyright: ignore[reportArgumentType]
             self.chat_text.delete(1.0, END)
             self.chat_text.config(state=DISABLED) # pyright: ignore[reportArgumentType]
-            for msg in chat_record[friend_name]:
+            for msg in connect.chat_record[friend_name]:
                 self.display_message(msg)
+    
+    def update_friend_status(self, friend_name, status):
+        """
+        更新指定好友的状态
+        :param friend_name: 好友名称
+        :param status: 新状态，如 "在线"、"离线" 等
+        """
+        # 遍历所有项，找到匹配的好友并更新状态
+        for item in self.friend_listbox.get_children():
+            if self.friend_listbox.item(item, "text") == friend_name:
+                self.friend_listbox.item(item, values=(status,))
+                break
     
     def send_message(self):
         """发送消息"""
@@ -515,20 +261,17 @@ class WeChatUI:
                 messagebox.showerror("错误", "请先选择一个好友")
                 return
             this_friend = None
-            for key in friends.keys():
-                if friends[key]["name"] == self.friend_listbox.item(self.friend_listbox.selection()[0])["text"]:
-                    this_friend = friends[key]
+            for key in connect.friends.keys():
+                if connect.friends[key]["name"] == self.friend_listbox.item(self.friend_listbox.selection()[0])["text"]:
+                    this_friend = connect.friends[key]
             if not this_friend:
                 messagebox.showerror("错误", "未找到好友信息")
                 return
             try:
                 message_bytes = message.encode('utf-8')
-                if len(message_bytes) > MAX_CHUNK_SIZE:
-                    send_long_message(this_friend["user_id"], this_friend["public_key"], message)
-                else:
-                    send_message(this_friend["user_id"], this_friend["public_key"], message)
+                connect.send_message(this_friend["user_id"], this_friend["public_key"], message)
                 self.display_message(f"我: {message}")
-                chat_record[this_friend["name"]].append(f"我: {message}")
+                connect.chat_record[this_friend["name"]].append(f"我: {message}")
                 self.message_input.delete(1.0, END)
             except Exception as e:
                 messagebox.showerror("发送失败", f"消息发送失败，可能对方不在线")
@@ -541,9 +284,9 @@ class WeChatUI:
             messagebox.showerror("错误", "请先选择一个好友")
             return
         this_friend = None
-        for key in friends.keys():
-            if friends[key]["name"] == self.friend_listbox.item(self.friend_listbox.selection()[0])["text"]:
-                this_friend = friends[key]
+        for key in connect.friends.keys():
+            if connect.friends[key]["name"] == self.friend_listbox.item(self.friend_listbox.selection()[0])["text"]:
+                this_friend = connect.friends[key]
         if not this_friend:
             messagebox.showerror("错误", "未找到好友信息")
             return
@@ -553,9 +296,9 @@ class WeChatUI:
                 with open(file_path, "rb") as f:
                     file_data = base64.b64encode(f.read()).decode('utf-8')
                 message = f"{file_data} card(file) {os.path.basename(file_path)}"
-                send_long_message(this_friend["user_id"], this_friend["public_key"], message)
+                connect.send_message(this_friend["user_id"], this_friend["public_key"], message)
                 self.display_card("我: "+message)
-                chat_record[this_friend["name"]].append("我: "+message)
+                connect.chat_record[this_friend["name"]].append("我: "+message)
             except Exception as e:
                 messagebox.showerror("发送失败", f"文件发送失败，可能对方不在线")
                 messagebox.showerror("发送失败", str(e))
@@ -600,13 +343,37 @@ class WeChatUI:
 
 def main():
     global message_cache, message_cache_open
+    for name in firends_online.keys():
+        friend = firends_online[name]
+        user_id = friend["user_id"]
+        if not friend["host"]:
+            try:
+                url = f"https://xn--jzh-k69dm57c4fd.xyz/ipv6_query.php?uuid={user_id}"
+                response = urllib.request.urlopen(url, timeout=10, context=context)
+                content = response.read()
+                host = json.loads(content.decode('utf-8'))["ipv6_address"]
+            except urllib.error.URLError as e:
+                messagebox.showerror("错误", f"网络请求失败: {e}")
+                print(f"网络请求失败: {e}")
+                sys.exit(1)
+            except socket.timeout:
+                messagebox.showerror("错误", "连接超时，请检查网络连接")
+                print("连接超时，请检查网络连接")
+                sys.exit(1)
+            except Exception as e:
+                messagebox.showerror("错误", f"网络请求时发生错误: {e}")
+                print(f"网络请求时发生错误: {e}")
+                sys.exit(1)
+            firends_online[name]["host"] = host
+        if not firends_online[name]["oline"]:
+            firends_online[name]["oline"] = send_heartbeat(firends_online[name]["host"], 19043, name)
     try:
         # 使用非阻塞方式尝试获取消息，设置超时为0
         message = message_queue.get_nowait()
         if message:
-            # 检查chat_record中是否有该好友的记录，如果没有则创建
-            if message["name"] not in chat_record:
-                chat_record[message["name"]] = []
+            # 检查connect.chat_record中是否有该好友的记录，如果没有则创建
+            if message["name"] not in connect.chat_record:
+                connect.chat_record[message["name"]] = []
             
             # 尝试更新UI，但只有在有选择好友且选择的是当前发消息的好友时才显示
             try:
@@ -629,7 +396,7 @@ def main():
                                     # 组装完成，显示完整消息
                                     full_message = message_caches[msg_id]
                                     ui.display_message(f"{message['name']}: {full_message}")
-                                    chat_record[message["name"]].append(f"{message['name']}: {full_message}")
+                                    connect.chat_record[message["name"]].append(f"{message['name']}: {full_message}")
                                     # 清理缓存
                                     del message_caches[msg_id]
                                     active_messages[msg_id] = False
@@ -647,7 +414,7 @@ def main():
                                     if f"{msg_id}_received" in active_messages:
                                         active_messages[f"{msg_id}_received"] += 1
                         else:
-                            chat_record[message["name"]].append(f"{message['name']}: {message['message']}")
+                            connect.chat_record[message["name"]].append(f"{message['name']}: {message['message']}")
                             ui.display_message(f"{message['name']}: {message['message']}")
             except Exception as e:
                 print(f"UI更新错误: {e}")
@@ -666,6 +433,8 @@ if __name__ == "__main__":
     stop_event = threading.Event()
     server_thread = threading.Thread(target=start_server, args=("::", 19042, message_queue, stop_event), daemon=True)
     server_thread.start()
+    server_thread_Peer = threading.Thread(target=Peer_server, args=("::", 19043, stop_event), daemon=True)
+    server_thread_Peer.start()
 
     # 主线程从队列中获取消息并处理
     app = ttk.Window(themename="cosmo")
@@ -674,4 +443,5 @@ if __name__ == "__main__":
     app.mainloop()
     stop_event.set()
     server_thread.join(timeout=1)
+    server_thread_Peer.join(timeout=1)
     sys.exit()
