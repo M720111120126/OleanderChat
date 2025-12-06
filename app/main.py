@@ -299,6 +299,8 @@ class WeChatUI:
                 connect.send_message(this_friend["user_id"], this_friend["public_key"], message)
                 self.display_card("我: "+message)
                 connect.chat_record[this_friend["name"]].append("我: "+message)
+            except MemoryError:
+                messagebox.showerror("发送失败", f"文件过大，不建议使用OleanderChat发送大文件，建议使用带密码的压缩包上传至网盘后使用OleanderChat分享链接")
             except Exception as e:
                 messagebox.showerror("发送失败", f"文件发送失败，可能对方不在线")
                 messagebox.showerror("发送失败", str(e))
@@ -333,16 +335,8 @@ class WeChatUI:
             self.chat_text.tag_bind("url", "<Button-1>", lambda e, f=file: download_file(f))
             self.chat_text.see(END)
             self.chat_text.config(state=DISABLED) # pyright: ignore[reportArgumentType]
-    
-    def custom_font_setting(self, family="微软雅黑", size=10):
-        """自定义字体设置"""
-        self.custom_font = tkfont.Font(family=family, size=size)
-        self.chat_text.config(font=self.custom_font)
-        self.message_input.config(font=self.custom_font)
-        self.chat_title.config(font=self.custom_font)
 
 def main():
-    global message_cache, message_cache_open
     for name in firends_online.keys():
         friend = firends_online[name]
         user_id = friend["user_id"]
