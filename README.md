@@ -18,7 +18,9 @@ OleanderChat/
 ├── app/                    # 客户端应用目录
 │   ├── addressBook/        # 好友信息存储目录
 │   ├── output/             # 临时文件输出目录
-|   ├── build.bat           # Windows下的打包脚本文件
+│   ├── build.bat           # Windows下的打包脚本文件
+│   ├── connect.py          # 连接模块
+│   ├── icon.ico            # 应用图标文件
 │   ├── main.py             # 主程序文件
 │   ├── user.py             # 用户管理和加密功能模块
 │   └── VersionInfo.txt     # 版本信息文件
@@ -26,18 +28,19 @@ OleanderChat/
 │   ├── id_allocator.php    # 用户ID分配服务
 │   ├── ipv6_allocator.php  # IPv6地址注册服务
 │   └── ipv6_query.php      # IPv6地址查询服务
-└── README                  # 项目说明文档
+├── LICENSE                 # 项目许可证文件
+└── README.md               # 项目说明文档
 ```
 
 ## 技术栈
 
-- **客户端**：Python 3.x
+- **客户端**：Python 3.x （仅验证Python3.7及3.12版本）
   - Tkinter/ttkbootstrap - 图形用户界面
   - PyCryptoDome - 加密库
   - socket - 网络通信
   - threading - 多线程处理
   - queue - 线程间通信
-- **服务器端**：PHP + MySQL
+- **服务器端**：PHP + MySQL （仅验证PHP-7.4和MySQL5.6.51版本）
   - 提供用户ID分配
   - 管理IPv6地址注册和查询
 
@@ -68,7 +71,7 @@ OleanderChat/
 
 ### 客户端要求
 
-- Python 3.6 或更高版本
+- Python 3.X （仅验证Python3.7及3.12版本）
 - 以下Python库：
   - pycrypto/pycryptodome
   - pyzipper
@@ -136,7 +139,6 @@ pip install pycryptodome pyzipper ttkbootstrap
 ### 注意事项
 
 - 确保双方都在线且网络连接正常
-- 消息长度限制为128个字符
 - 首次使用需要服务器连接以注册用户ID和IPv6地址（仅用于获取其它用户IPv6地址）
 - 好友添加需要对方的公开信息文件（`me.zip`）
 - 如果您的修改可以兼容原版OleanderChat，务必允许用户自主选择服务器（包括自建服务器和官方服务器）。
